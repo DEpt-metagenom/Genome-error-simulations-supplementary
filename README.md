@@ -5,7 +5,7 @@ Online supplementary material
 The `basic_supplementary_material` directory contains the results of the statistics of simulated genome assemblies with different types and ratios of sequencing errors (error rate, sequencing depth, optical duplicate ratio, and PCR duplicate ratio). The `.Rmd` file was knitted and the output is uploaded as gziped html. After cloning the repository by running `git clone https:...git` and unzipping `basic_supplementary_material/suppl_mat_for_review_V2.html.gz`, it can be opened in any browser. To recompile this output you need the file `load_vars.Rdata` which is located in the directory `interactive_supplementary_material`.
 
 ## Interactive Supplementary Material
-This is the ShinyApp that is based on the data presented in our paper (Rádai et al. ...) [TO BE SUPPLEMENTED]
+This is the ShinyApp that is based on the data presented in our paper (Rádai et al. An overlooked phenomenon: complex interactions of potential error sources on the quality of bacterial *de novo* genome assemblies, under review)
 
 This online supplementary material is used to visualize the results of multiplicative models in which the effects of sequencing errors on genome assembly quality metrics are assessed.
 
@@ -23,7 +23,7 @@ Pairwise comparisons of quality metric values over the defined range of sequenci
 
 ## Running the app
 There are multiple ways to run the ShinyApp.
-The first way is to clone this repository by running `git clone https:...git` [TO BE SUPPLEMENTED] in a terminal and then opening `interactive_supplementary_material/overlooked_phenomenon_shinyapp.R` in Rstudio. Clicking the "Run App" button, the application is created and opens in a new window. There is a possibility that you will need to open this page in your browser for full compatibility (Firefox and Chrome/Chromium all work fine).
+The first way is to clone this repository by running `git clone https://github.com/DEpt-metagenom/Genome-error-simulations-supplementary.git` in a terminal and then opening `interactive_supplementary_material/overlooked_phenomenon_shinyapp.R` in Rstudio. Clicking the "Run App" button, the application is created and opens in a new window. There is a possibility that you will need to open this page in your browser for full compatibility (Firefox and Chrome/Chromium all work fine).
 
 The second option is to build a container using Apptainer (formerly Singularity). After cloning the repository, navigate to the `interactive_supplementary_material` directory. Running the command `apptainer build overlooked_phenomenon_shinyapp.sif apptainer.def` (you need sudo permissions) will create an Apptainer image containing `load_vars.Rdata`, `overlooked_phenomenon_shinyapp.R` and all dependencies needed to run the app. Then, when you run `apptainer run overlooked_phenomenon_shinyapp.sif`, you will get the message 'You can access the ShinyApp by opening the following link in your browser: http://127.0.0.1:6186/'. The ShinyApp will launch in a few seconds, and when you open this link in your browser, the app will be ready to use.
 
