@@ -2,7 +2,7 @@
 Online supplementary material
 
 ## Static supplementary material
-The `basic_supplementary_material` directory contains the results of the statistics of simulated genome assemblies with different types and ratios of sequencing errors (error rate, sequencing depth, optical duplicate ratio, and PCR duplicate ratio). The `.Rmd` file was knitted and the output is uploaded as gziped html. After cloning the repository by running `git clone https:...git` and unzipping `basic_supplementary_material/suppl_mat_for_review_V2.html.gz`, it can be opened in any browser. To recompile this output you need the file `load_vars.Rdata` which is located in the directory `interactive_supplementary_material`.
+The `basic_supplementary_material` directory contains the results of the statistics of simulated genome assemblies with different types and ratios of sequencing errors (error rate, sequencing depth, optical duplicate ratio, and PCR duplicate ratio). The `.Rmd` file was knitted and the output is uploaded as gziped html. After cloning the repository by running `git clone https://github.com/DEpt-metagenom/Genome-error-simulations-supplementary.git` and unzipping `basic_supplementary_material/suppl_mat_for_review_V2.html.gz`, it can be opened in any browser. To recompile this output you need the file `load_vars.Rdata` which is located in the directory `interactive_supplementary_material`.
 
 ## Interactive Supplementary Material
 This is the ShinyApp that is based on the data presented in our paper (Rádai et al. An overlooked phenomenon: complex interactions of potential error sources on the quality of bacterial *de novo* genome assemblies, under review)
