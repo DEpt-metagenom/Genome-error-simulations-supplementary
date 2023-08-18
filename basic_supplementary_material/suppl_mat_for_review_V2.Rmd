@@ -1,0 +1,944 @@
+---
+title: "An overlooked phenomenon: complex interactions of potential error sources on the quality of bacterial *de novo* genome assemblies"
+subtitle: "Supplementary material for review"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    toc_depth: 3
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, warning=FALSE, fig.width=5, fig.height=5, error=FALSE, message=FALSE}
+
+require(tidyr)
+require(dplyr)
+library("knitr")
+library("kableExtra")
+library("data.table")
+library("stats")
+library("utils")
+library("Matrix")
+library("coda")
+library("ape")
+library("car")
+library("MASS")
+library("vegan")
+library("lme4")
+library("lmerTest")
+library("MCMCglmm")
+library("glmmTMB")
+library("emmeans")
+library("Rtsne")
+library("lattice")
+library("grid")
+library("colorspace")
+library("ggplot2") 
+require(plotly)
+library("ggrepel")
+library("gtable")
+library("ggdark")
+library("plyr")
+library("dplyr")
+library("png")
+library("phytools")
+library("MuMIn")
+library("ggcorrplot")
+library("performance")
+library("betareg")
+library("rcompanion")
+library("seqinr")
+
+library("meta")
+library("metafor")
+library("metaviz")
+
+library("pavian")
+library("DT")
+library("data.table")
+library("downloadthis")
+
+#---------------------
+
+rsc = function(x, na.rm=TRUE){
+  if(is.data.frame(x) | is.matrix(x)){
+    for(c in 1:ncol(x)){
+      x[,c] = (na.omit(x[,c]) - mean(x[,c], na.rm=na.rm))/sd(x[,c], na.rm=na.rm)
+    }
+  }else{
+    x = (na.omit(x)-mean(x, na.rm=na.rm))/sd(x, na.rm=na.rm)
+  }
+  return(as.numeric(x))
+}
+
+tinv = function(x, log=FALSE, logplus=0, na.rm=TRUE){
+  if(log){
+    x.inv = (max(log(x+logplus), na.rm=na.rm) - log(x+logplus))
+  }else{
+    x.inv = (max(x+1) - x)^(-1)
+  }
+  return(x.inv)
+}
+
+multiplot = function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+  
+  numPlots = length(plots)
+  
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols), byrow = TRUE)
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+tbeta = function(x){
+  x.t = (x*(length(x)-1)+0.5)/length(x)
+  return(x.t)
+}
+
+range2 = function(x){
+  range2.x = c(
+    min(x, na.rm = T),
+    mean(x, na.rm = T),
+    max(x, na.rm = T)
+  )
+  return(range2.x)
+}
+
+stouffer = function(z, w=NULL){
+  
+  if(is.null(w)){
+    z.s = sum(z)/sqrt(length(z))
+  }else{
+    z.s = sum(w*z)/sqrt(sum(w^2))
+  }
+  
+  return(z.s)
+  
+}
+
+fisherp = function(p){
+  if(any(p==0)){p[p==0] = 2e-20}
+  chi.p = -2 * sum(log(p))
+  p.p = 1 - pchisq(q = chi.p, df = 2*length(p))
+  return(list(chisq = chi.p, pval = p.p))
+}
+
+#----------------------------------------------------------------------------
+
+# load data
+load("load_vars.RData")
+
+P.alpha = 0.003
+
+qvar.groups = c(
+  rep("contiguity", 8),
+  "completeness",
+  rep("accuracy",3),
+  "completeness",
+  "accuracy"
+)
+names(qvar.groups) = qvar.labels$qvar
+qvar.modifier = c(-1, -1, -1, 1, 1, 1, -1, -1, -1, -1, -1, -1, 1, 1)
+names(qvar.modifier) = qvar.labels$qvar
+
+```
+
+# Bacteria
+
+```{r echo=FALSE, fig.align='center', fig.width=6, fig.height=4}
+
+bacs.2 = bacs[,c("species", "working.ID", "size.mb.full", "complexity", "GC", "accession.of.genome")]
+colnames(bacs.2) = c("Species", "Working ID", "Genome size (Mbp)", "Unique ratio", "GC%", "NCBI accession code")
+bacs.2$`Unique ratio` = round(bacs.2$`Unique ratio`, 3)
+
+options(DT.options = list(pageLength = 13))
+
+datatable(bacs.2[order(bacs.2$Species),], options = list(
+  columnDefs = list(list(className = "dt-left", targets = c(2) )))) %>%
+  formatStyle(c("Genome size (Mbp)"),
+              background = styleColorBar(range(bacs.2$`Genome size (Mbp)`), "lightblue", -90), 
+              backgroundPosition = "left") %>%
+  formatStyle(c("Unique ratio"),
+              background = styleColorBar(range(bacs.2$`Unique ratio`), "lightblue", -90), 
+              backgroundPosition = "left") %>%
+  formatStyle(c("GC%"),
+              background = styleColorBar(range(bacs.2$`GC%`), "lightblue", -90), 
+              backgroundPosition = "left")
+
+bacs.2 %>% download_this(
+    output_name = "bacteria",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download bacteria",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+#---
+
+g.bac = ggplot(bacs.2, aes(x = `GC%`, y = `Unique ratio`, size = `Genome size (Mbp)`, colour = Species)) +
+  geom_point() +
+  theme_bw()
+g.bac = ggplotly(g.bac) %>% layout(showlegend = FALSE)
+g.bac
+
+```
+
+
+# Assembly quality metrics {.tabset .tabset-pills}
+
+```{r echo=FALSE, results='asis', warning=FALSE, fig.align='center', fig.width=8, fig.height=8}
+
+qvar.show = qvar.labels[qvar.labels$qvar!="predicted.unique.genes",]
+qvar.show = qvar.show[order(qvar.show$label),]
+qvar.show %>%
+  knitr::kable(row.names=FALSE, align = "l") %>%
+  kable_styling(full_width = F) %>%
+  print()
+
+for(q in qvar.labels$qvar[qvar.labels$qvar!="predicted.unique.genes"]){
+  
+  cat(sprintf("\n\n## `%s` {.tabset .tabset-pills} \n\n", qvar.labels$label[qvar.labels$qvar==q]))
+  
+  print(
+    ggplot(asq, aes_string(q)) +
+      geom_histogram(aes(y = ..density..), bins = 50) +
+      geom_density() +
+      xlab("") +
+      ggtitle(qvar.labels$label[qvar.labels$qvar==q]) +
+      facet_wrap(~bact.ID, scales = "free") +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 90), plot.title = element_text(hjust = 0.5))
+  )
+  
+}
+
+
+#---
+
+#q.corr = cor(asq[,qvar.labels$qvar], method = "spearman", use = "pairwise.complete.obs")
+#q.corr.p = ggcorrplot::cor_pmat(q.corr)
+#ggcorrplot(corr = q.corr, p.mat = q.corr.p, sig.level = 0.003, insig = "blank")
+
+```
+
+
+# Sample parameters
+
+
+```{r echo=FALSE, results='asis', warning=FALSE}
+
+evar.labels %>%
+  knitr::kable(row.names=FALSE, align = "l") %>%
+  kable_styling(full_width = F) %>%
+  print()
+
+```
+
+
+# Data table
+
+
+```{r echo=FALSE, results='asis', warning=FALSE}
+
+asq %>% download_this(
+    output_name = "genome_error_simulations",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download main data table",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+```
+
+
+# Additive models
+
+Prior to model fitting, quality metrics were transformed as:
+
+$$ y' = \frac{y}{max_y} $$
+$$ y'' = \frac{y' × (N_{y'} - 1) + 0.5}{N_{y'}} $$
+
+where $N$ is the number of observations.
+
+Sample parameters (error rate [err], sequencing depth [cov], PCR duplicate ratio [pdup], optical duplicate ratio [odup]) were re-scaled with z-score transformation:
+
+$$ x' = \frac{x - \mu_x}{\sigma_x} $$
+
+where $\mu_x$ is the arithmetic mean of $x$, and $\sigma_x$ is the standard deviation of $x$.
+
+Model formulation:
+
+```{r eval=FALSE}
+
+for(b in unique(asq$bact.ID)){
+  for(y in qvars){
+    
+    df.y = na.omit(asq[asq$bact.ID==b,])
+    df.y$y = tbeta(df.y[,y]/max(df.y[,y]))
+    
+    m.y = betareg(y ~ cov.rsc + err.rsc + odup.rsc + pdup.rsc, data = df.y, 
+                  control = betareg.control(maxit = 1e4, fsmaxit = 2e3, fstol = 1e-8))
+    
+  }
+}
+
+```
+
+## Effect sizes
+
+Legend for the figures below:
+
+ - dots: regression slope estimates
+ - segments: 99.7% confidence interval
+ - black dotted vertical line: zero
+ - black solid, dashed, or dot-dash vertical line: pooled effect size based on the simple meta-regression model (no moderators) for significant (P $\le$ `r P.alpha`), suggestive (`r P.alpha` < P < 0.05 ) and non-significant (P > 0.05) effect size, respectively
+ - green vertical lane: 99.7% confidence interval of pooled effect size based on the simple meta-regression model (no moderators)
+
+Data tables for the estimated marginal trends (EMTs), and meta-regression (MR) output for MR models without (MR no mods) and with moderator variables (MR with mods) can be downloaded below:
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=9, fig.height=9}
+
+emt.add %>% download_this(
+    output_name = "EMT_additive",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download EMTs",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+meta.add %>% download_this(
+    output_name = "MetaReg_additive_NoModerators",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download MR (no mods)",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+meta.add.WithMod %>% download_this(
+    output_name = "MetaReg_additive_WithModerators",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download MR (with mods)",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+
+
+for(q in qvar.labels$qvar){
+  
+  cat(sprintf("\n\n### `%s` \n\n", qvar.labels$label[qvar.labels$qvar==q]))
+  
+  gglist = list()
+  for(e in evar.labels$evar){
+    
+    emt.qe = emt.add[emt.add$qvar==q & emt.add$evar==paste(e,"rsc", sep="."),]
+    mr.qe = meta.add[meta.add$qvar==q & meta.add$evar==paste(e,"rsc", sep="."),]
+    
+    if(mr.qe$P<=P.alpha){
+      effect.line = "solid"
+    }else{
+      if(mr.qe$P<0.05){
+        effect.line = "dashed"
+      }else{
+        effect.line = "dotdash"
+      }
+    }
+    
+    gglist[[e]] = ggplot(emt.qe, aes(x = estimate, y = bact.ID)) +
+      geom_point(size=2) +
+      geom_errorbar(aes(xmin = CI.low, xmax = CI.up, width = 0)) +
+      geom_vline(xintercept = 0, linetype = "dotted") +
+      xlab("effect size estimate ± 99.7% CI") +
+      ggtitle(paste0("Effect of ", evar.labels$label[evar.labels$evar==e]," \n on ",qvar.labels$label[qvar.labels$qvar==q])) +
+      theme_bw() +
+      theme(plot.title = element_text(hjust=0.5)) +
+      annotate("rect", xmin = mr.qe$CI.low, xmax = mr.qe$CI.up, ymin = -Inf, ymax = Inf, fill = "green", alpha = 0.5) +
+      geom_vline(xintercept = mr.qe$estimate, size = 1, linetype = effect.line)
+    
+  }
+  multiplot(plotlist = gglist, cols = 2)
+}
+
+```
+
+## Genome parameters
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=10, fig.height=8}
+
+for(q in qvar.labels$qvar){
+  
+  cat(sprintf("\n\n### `%s` {.tabset .tabset-pills} \n\n", qvar.labels$label[qvar.labels$qvar==q]))
+  
+  for(e in evar.labels$evar){
+    
+    cat(sprintf("\n\n#### `%s` {.tabset .tabset-pills} \n\n", evar.labels$label[evar.labels$evar==e]))
+    emt.qe = emt.add[emt.add$qvar==q & emt.add$evar==paste(e,"rsc", sep="."),]
+    
+    gglist = list()
+    for(g in gvar.labels$gvar){
+      
+      mr.qe = meta.add.WithMod[meta.add.WithMod$qvar==q & meta.add.WithMod$evar==e & meta.add.WithMod$gvar==g,]
+      
+      if(any(mr.qe$P[-1] <= P.alpha)){
+        effect.line = "solid"
+      }else{
+        if(any(mr.qe$P[-1]<0.05)){
+          effect.line = "dashed"
+        }else{
+          effect.line = "dotdash"
+        }
+      }
+      
+      x0 = seq(min(bacs[,g]), max(bacs[,g]), length.out = 50)
+      if(g=="GC"){
+        xx = cbind(1, poly(x0, 2) )
+      }else{
+        xx = cbind(1, x0 )
+      }
+      bb = mr.qe[,"estimate"]
+      yy = as.numeric(xx %*% bb)
+      metareg.slope = data.frame(mod = x0, estimate = yy)
+      
+      
+      emt.qe$mod = emt.qe[,g]
+      gglist[[g]] = ggplot(emt.qe, aes(x = mod, y = estimate, color = bact.ID)) +
+        geom_point(size=2) +
+        geom_errorbar(aes(ymin = CI.low, ymax = CI.up, width = 0)) +
+        ylab("effect size estimate ± 99.7% CI") +
+        xlab(gvar.labels$label[gvar.labels$gvar==g]) +
+        ggtitle(paste0("Effect of ", evar.labels$label[evar.labels$evar==e]," \n on ",qvar.labels$label[qvar.labels$qvar==q])) +
+        theme_bw() +
+        theme(plot.title = element_text(hjust=0.5)) +
+        geom_line(data = metareg.slope, mapping = aes(x = mod, y = estimate), linetype = effect.line, inherit.aes = F)
+      
+    }
+    multiplot(plotlist = gglist, cols = 2)
+  }
+}
+
+```
+
+
+## False discovery rate (FDR) and Stouffer's Z-score modification
+
+Due to the large total number of hypothesis tests throughout our analyses, one might prompt that some sort of p-value adjustment and/or false discovery rate (FDR) estimation is necessary. However, it should be noted that this would only be strictly true in the case of carrying out a large number independent hypothesis tests on the same data. In our case, though, data is independent across bacteria, whereas the underlying hypothesis is the same. Also note that simple (permutation-based) p-value adjustments and FDR estimation don't take context into consideration. This was one of the main motivations for us to pool effect sizes in meta-analysis, which implicitly accounts for a context-dependent multiple-test scenario.
+
+The effect size estimates for the different quality metrics assessed separately per each sample parameter (e.g. effect of error rate on NG50, effect of sequencing depth on number of contigs), are not part of independent hypotheses, since every quality metric corresponds to a relevant aspect of the assemblies' quality. Therefore when we repeatedly test the sample parameters' effects on these, an increased incidence of significant effects are associated with an increased likelihood that our findings are genuine, instead of being the result of type I error (i.e. false positive results). In such a scenario, Fisher's combined probability test, as well as Stouffer's Z-score, give adequate quantification for the robustness of the results.
+
+Fisher's method includes the estimation of a $X^2$ statistic from the extreme value probabilities (p-values):
+
+$$X^2 = -2 \sum_{i=1}^k log(p_i) $$
+
+where $k$ is the number of tests. 
+
+Stouffer's Z-score is:
+
+$$Z = \frac{\sum_{i=1}^k Z_i}{\sqrt{k}}$$
+
+Since we're interested whether or not a given sample parameter has consistent effect across quality metrics, we can calculate the above mentioned quantities separately for each sample parameter. Note that these methods yield one estimate for each sample parameter, representing its significance effecting each quality metric. In other words, for each sample parameter, the number of p-values used in Fisher's method, and number of z-scores used in Stouffer's method, was the number of quality metrics on which modeling was carried out (n = `r nrow(qvar.labels)`), representing the significance of the association between that given sample parameter and quality metrics. FDR may then be applied on the four estimates (i.e. adjusting the estimates for each sample parameters).
+
+Some z-scores were multiplied by $-1$ so that all z-scores all conceptually consistent with representing a sample parameter's effect on assembly quality (i.e. their direction is aligned so negative values represent adverse, positive values represent advantageous effects):
+
+```{r echo=FALSE, results='asis'}
+
+data.frame(metric = qvar.labels$label, multiplier = qvar.modifier) %>%
+  knitr::kable(row.names=FALSE, align = "l") %>%
+  kable_styling(full_width = F) %>%
+  print()
+
+```
+
+On the figure below Fisher's $X^2$ and Stouffer's Z-score are shown for the four sample parameters, representing the significance of their effects over all quality metrics, based on their pooled effect sizes from the meta-analysis models.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=5, fig.height=4}
+
+require(fdrtool)
+
+#cor.all = cor(asq[,qvar.labels$qvar], method="spearman", use = "pairwise.complete.obs")
+
+adj.df = data.frame(
+  evar = "",
+  evar.label = "",
+  stouffer.z = 0,
+  fisher.chisq = 0,
+  fisher.p = 0
+)[-1,]
+for(e in unique(meta.add$evar)){
+  
+  ma.eg = meta.add[meta.add$evar==e,]
+  
+  fisher.eg = fisherp(p = ma.eg$P)
+  adj.df = rbind(
+    adj.df,
+    data.frame(
+      evar = e,
+      evar.label = evar.labels$label[evar.labels$evar==gsub(pattern = ".rsc", replacement = "", x = e)],
+      stouffer.z = stouffer(z = ma.eg$z * qvar.modifier), # stouffer(z = ma.eg$z * qvar.modifier[qq], w = w)
+      fisher.chisq = fisher.eg$chisq,
+      fisher.p = fisher.eg$pval
+    )
+  )
+  
+}
+
+gpp = ggplot(adj.df, aes(x = stouffer.z, y = fisher.chisq, colour = fisher.p, label = evar.label)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  xlab("Stouffer's Z") +
+  ylab("Fisher's Chi-squared") +
+  geom_rect(aes(xmin = -3, xmax = 3, ymin = -Inf, ymax = Inf), fill = "red", colour = "red", alpha = 0.5) +
+  geom_vline(xintercept = -3, linetype = "dashed", colour = "red") +
+  geom_vline(xintercept = 3, linetype = "dashed", colour = "red")
+
+ggplotly(gpp)
+
+```
+
+```{r echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+
+if(all(adj.df$fisher.p==0)){
+  cat("Estimation of FDR is not possible due to all p-values being zero! (More precisely: estimated p-values are below the minimum representable value of R.)\n")
+}else{
+  require(fdrtool)
+  fdr.g = fdrtool(x = adj.df$fisher.p, statistic = "pvalue", plot = F, color.figure = F, verbose = F)
+  adj.df[,"local.FDR"] = fdr.g$lfdr
+  adj.df[,"FDR.p"] = fdr.g$pval
+  adj.df[,c(-1)] %>% 
+    knitr::kable(row.names=FALSE, align = "l") %>%
+    kable_styling(full_width = F) %>%
+    print()
+  cat("**NOTE: ** FDR estimates may be unreliable, due to low number of input statistics (n = 13; censored sample for null model estimation has only size 1)!\n")
+}
+
+```
+
+# Multiplicative models
+
+Prior to model fitting, quality metrics were transformed as:
+    
+$$ y' = \frac{y}{max_y} $$
+
+$$ y'' = \frac{y' × (N_{y'} - 1) + 0.5}{N_{y'}} $$
+
+where $N$ is the number of observations.
+
+Sample parameters (error rate [err], sequencing depth [cov], PCR duplicate ratio [pdup], optical duplicate ratio [odup]) were re-scaled with z-score transformation:
+    
+$$ x' = \frac{x - \mu_x}{\sigma_x} $$
+
+where $\mu_x$ is the arithmetic mean of $x$, and $\sigma_x$ is the standard deviation of $x$.
+
+Model formulation:
+
+```{r eval=FALSE}
+
+for(b in unique(asq$bact.ID)){
+  for(y in qvars){
+    
+    df.y = na.omit(asq[asq$bact.ID==b,])
+    df.y$y = tbeta(df.y[,y]/max(df.y[,y]))
+    
+    m.y = betareg(y ~ cov.rsc * err.rsc * odup.rsc * pdup.rsc, data = df.y, 
+                  control = betareg.control(maxit = 1e4, fsmaxit = 2e3, fstol = 1e-8))
+    
+  }
+}
+
+```
+
+
+## Model coefficients
+
+Model coefficients directly from the model outputs:
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=9, fig.height=9}
+
+coefs.mult %>% download_this(
+    output_name = "model_coefficients_multiplicative",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download coefficients",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+```
+
+Coefficients pooled (with meta-regression model without moderator variables) across bacteria:
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=9, fig.height=9}
+
+meta.mult.coefs %>% download_this(
+    output_name = "MetaReg_pooled_model_coefficients_multiplicative",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download pooled coefficients",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+```
+
+## Effect sizes
+
+Data tables for the model coefficients acquired directly from the model output, estimated marginal trends (EMTs), and meta-regression (MR) output for MR models without (MR no mods) and with (MR with mods) can be downloaded below. EMTs were acquired for error rate, marginalized at different value combinations of the 3 other sample parameters (sequencing depth, PCR and optical duplicate ratios).
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=9, fig.height=9}
+
+emt.mult %>% download_this(
+    output_name = "EMT_multiplicative",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download EMTs",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+meta.mult %>% download_this(
+    output_name = "MetaReg_multiplicative_NoModerators",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download MR (no mods)",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+meta.mult.WithMod %>% download_this(
+    output_name = "MetaReg_multiplicative_WithModerators",
+    output_extension = ".csv",
+    sep = ";",
+    button_label = "Download MR (with mods)",
+    button_type = "warning",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+)
+
+
+meta.mult$significance[meta.mult$P<=P.alpha] = "significant"
+meta.mult$significance[meta.mult$P>P.alpha & meta.mult$P < 0.05] = "suggestive"
+meta.mult$significance[meta.mult$P>=0.05] = "nonsignificant"
+for(q in qvar.labels$qvar){
+  
+  cat(sprintf("\n\n### `%s` \n\n", qvar.labels$label[qvar.labels$qvar==q]))
+  
+  print(
+    ggplot(meta.mult[meta.mult$qvar==q,], aes(x = cov, y = estimate, group = qvar, shape = significance)) +
+      geom_point(size = 3) +
+      scale_shape_manual(values = c(nonsignificant=4, suggestive=1, significant=19)) +
+      geom_errorbar(aes(ymin = CI.low, ymax = CI.up, width = 0)) +
+      facet_grid(odup~pdup) +
+      theme_bw() +
+      geom_hline(yintercept = 0, linetype = "dotted") +
+      ylab("pooled effect size of error rate ± 99.7% CI") +
+      xlab("sequencing depth") +
+      ggtitle(qvar.labels$label[qvar.labels$qvar==q], subtitle = "horizontal: PCR dup. ratio | vertical: optical dup. ratio") +
+      theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
+      scale_x_continuous(breaks = c(25,87.5,150), name = "sequencing depth")
+  )
+  
+}
+
+```
+
+## Genome parameters
+
+```{r echo=FALSE, results='asis', fig.align='center', fig.width=10, fig.height=8}
+
+for(q in qvar.labels$qvar){
+  
+  cat(sprintf("\n\n### `%s` {.tabset .tabset-pills} \n\n", qvar.labels$label[qvar.labels$qvar==q]))
+  
+  emtm.q = emt.mult[emt.mult$qvar==q,]
+  
+  for(g in gvar.labels$gvar){
+    
+    cat(sprintf("\n\n#### `%s` \n\n", g))
+    
+    emtm.q$x = emtm.q[,g]
+    print(
+      ggplot(emtm.q, aes(x = x, y = estimate, color = as.factor(cov), group = as.factor(cov))) +
+        geom_point(size = 2) +
+        geom_line(alpha = 0.4) +
+        geom_errorbar(aes(ymin = CI.low, ymax = CI.up, width = 0)) +
+        facet_grid(odup~pdup) +
+        theme_bw() +
+        scale_color_discrete(name = "sequencing depth") +
+        geom_hline(yintercept = 0, linetype = "dotted") +
+        ylab("pooled effect size of error rate ± 99.7% CI") +
+        ggtitle(qvar.labels$label[qvar.labels$qvar==q], subtitle = "horizontal: PCR dup. ratio | vertical: optical dup. ratio") +
+        theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
+        xlab(gvar.labels$label[gvar.labels$gvar==g])
+    )
+    
+  }
+  
+}
+
+```
+
+
+## False discovery rate (FDR) and Stouffer's Z-score modification
+
+Same methods as in the Additive models, carried out on the pooled coefficients of the multiplicative models.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=5, fig.height=4}
+
+require(fdrtool)
+
+#cor.all = cor(asq[,qvar.labels$qvar], method="spearman", use = "pairwise.complete.obs")
+
+adj.df = data.frame(
+  evar = "",
+  evar.label = "",
+  stouffer.z = 0,
+  fisher.chisq = 0,
+  fisher.p = 0
+)[-1,]
+for(e in unique(meta.mult.coefs$coef)){
+  
+  ma.eg = meta.mult.coefs[meta.mult.coefs$coef==e,]
+  
+  fisher.eg = fisherp(p = ma.eg$P)
+  adj.df = rbind(
+    adj.df,
+    data.frame(
+      evar = e,
+      evar.label = NA,
+      stouffer.z = stouffer(z = ma.eg$z * qvar.modifier), # stouffer(z = ma.eg$z * qvar.modifier[qq], w = w)
+      fisher.chisq = fisher.eg$chisq,
+      fisher.p = fisher.eg$pval
+    )
+  )
+  
+}
+
+gpp = ggplot(adj.df, aes(x = stouffer.z, y = fisher.chisq, colour = fisher.p, label = evar)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  xlab("Stouffer's Z") +
+  ylab("Fisher's Chi-squared") +
+  geom_rect(aes(xmin = -3, xmax = 3, ymin = -Inf, ymax = Inf), fill = "red", colour = "red", alpha = 0.5) +
+  geom_vline(xintercept = -3, linetype = "dashed", colour = "red") +
+  geom_vline(xintercept = 3, linetype = "dashed", colour = "red")
+
+ggplotly(gpp)
+
+```
+
+```{r echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+
+if(all(adj.df$fisher.p==0)){
+  cat("Estimation of FDR is not possible due to all p-values being zero! (More precisely: estimated p-values are below the minimum representable value of R.)\n")
+}else{
+  require(fdrtool)
+  fdr.g = fdrtool(x = adj.df$fisher.p, statistic = "pvalue", plot = F, color.figure = F, verbose = F)
+  adj.df[,"local.FDR"] = fdr.g$lfdr
+  adj.df[,"FDR.p"] = fdr.g$pval
+  adj.df[,c(-2)] %>% 
+    knitr::kable(row.names=FALSE, align = "l") %>%
+    kable_styling(full_width = F) %>%
+    print()
+  cat("**NOTE: ** FDR estimates may be unreliable, due to low number of input statistics (n = 13; censored sample for null model estimation has only size 1)!\n")
+}
+
+```
+
+
+
+
+--------------------------------------------------------------------------------------------------
+
+
+```{r echo=FALSE, eval=FALSE}
+
+###----- try if we can acquire a predicted optimal set of values for the error-parameters based on the models -----
+
+y = "total.aligned.prop"
+b = "mgal"
+m = models.mult[[paste0(b, "_", y)]]
+
+pdup = 0
+odup = 0
+
+cov.range = seq(min(asq$cov, na.rm=T), max(asq$cov, na.rm=T), length.out = 10)
+err.range = seq(min(asq$err, na.rm=T), max(asq$err, na.rm=T), length.out = 10)
+rr = expand.grid(cov=cov.range, err=err.range)
+rr.2 = cbind(
+  rr,
+  data.frame(
+    odup = odup,
+    pdup = pdup
+  )
+)
+for(x in colnames(rr.2)){
+  rr.2[,paste0(x, ".rsc")] = (rr.2[,x] - mean(asq[,x], na.rm=T))/sd(asq[,x], na.rm=T)
+}
+preds.df = cbind(
+  rr.2,
+  data.frame(pred.y = predict(m, type = "response", newdata = rr.2))
+)
+preds.df$py.to.max.ratio = preds.df$pred.y/max(asq[asq$bact.ID==b,y], na.rm=T)
+preds.df$txt = paste0("predicted ", tolower(qvar.labels$label[qvar.labels$qvar==y]), ": ", round(preds.df$pred.y,3))
+
+pp = plot_ly(preds.df, x = ~cov, y = ~err, z = ~py.to.max.ratio, color = ~pred.y, text = ~txt) %>%
+  layout(
+    title = paste0(qvar.labels$label[qvar.labels$qvar==y], " (", bacs$species[bacs$working.ID==b], ")", "\n", "ODUP = ", odup,", PDUP = ", pdup),
+    scene = list(
+      xaxis = list(title = "sequencing depth (x)"),
+      yaxis = list(title = "error rate (y)"),
+      zaxis = list(title = "predicted-to-max ratio (z)")
+    )
+  )
+
+#---
+
+#--- comparing multiple quality metrics ---
+
+yy = c("total.aligned.prop", "NG50", "GC.ToRefRatio")
+b = "mgal"
+m = models.mult[[paste0(b, "_", y)]]
+pdup = 0
+odup = 0
+cov.range = seq(min(asq$cov, na.rm=T), max(asq$cov, na.rm=T), length.out = 10)
+err.range = seq(min(asq$err, na.rm=T), max(asq$err, na.rm=T), length.out = 10)
+rr = expand.grid(cov=cov.range, err=err.range)
+rr.2 = cbind(
+  rr,
+  data.frame(
+    odup = odup,
+    pdup = pdup
+  )
+)
+for(x in colnames(rr.2)){
+  rr.2[,paste0(x, ".rsc")] = (rr.2[,x] - mean(asq[,x], na.rm=T))/sd(asq[,x], na.rm=T)
+}
+
+if(length(yy)>detectCores()){
+  nc = detectCores()
+}else{
+  nc = length(yy)
+}
+cl = makeCluster(nc)
+registerDoSNOW(cl)
+multi.preds = foreach(
+  y = yy,
+  .combine = rbind
+) %dopar% {
+  
+  require(betareg)
+  
+  m = models.mult[[paste0(b, "_", y)]]
+  
+  py = predict(m, type = "response", newdata = rr.2)
+  py = (py*length(resid(m)) - 0.5)/(length(resid(m))-1)
+  py = py * max(asq[asq$bact.ID==b,y], na.rm=T)
+  
+  preds.df = cbind(
+    rr.2,
+    data.frame(pred.y = py)
+  )
+  
+  # the "predicted-to-max" should be modified to intuitively represent best quality
+  # (e.g. by using the original reference genome);
+  # ALSO keep in mind that for some metrics the large values are "good" (N50), 
+  # but for others small values are good (e.g. L50)
+  preds.df$py.to.max.ratio = preds.df$pred.y/max(asq[asq$bact.ID==b,y], na.rm=T)
+  preds.df$txt = paste0("predicted ", tolower(qvar.labels$label[qvar.labels$qvar==y]), ": ", round(preds.df$pred.y,3))
+  
+  preds.df$y = y
+  
+  return(preds.df)
+  
+}
+stopCluster(cl)
+
+
+
+# use multiple comparisons across all 'y' (need to construct new df for that... then use ggplot+facet_wrap(~y) then plotly)
+for(y in yy){
+  if(y==yy[1]){
+    mpdf = eval(parse(text=paste0("data.frame(",y,"=multi.preds$py.to.max.ratio[multi.preds$y==y])")))
+  }else{
+    dy = eval(parse(text=paste0("data.frame(",y,"=multi.preds$py.to.max.ratio[multi.preds$y==y])")))
+    mpdf = cbind(mpdf, dy)
+  }
+}
+
+ggpairs(cbind(mpdf,rr), aes(color = as.factor(cov), alpha = 0.5), columns = yy)
+
+gglist = list()
+for(i in 1:(length(yy)-1)){
+  for(j in (i+1):length(yy)){
+    
+    df.ij = data.frame(
+      x = mpdf[,i],
+      y = mpdf[,j],
+      cov = rr$cov,
+      err = rr$err
+    )
+    
+    g.ij = ggplot(df.ij, aes(x = x, y = y, colour = cov, size = err )) +
+      geom_point() +
+      xlab(qvar.labels$label[qvar.labels$qvar==colnames(mpdf)[i]]) +
+      ylab(qvar.labels$label[qvar.labels$qvar==colnames(mpdf)[j]]) +
+      theme_bw() +
+      ggtitle(paste0("Predicted-to-max ratio", "\n(", bacs$species[bacs$working.ID==b], ")")) +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      scale_color_viridis_c()
+    
+    gglist[[paste0("pair_",i,"_",j)]] = g.ij
+    
+  }
+}
+
+multiplot(plotlist = gglist, cols = 2)
+
+```

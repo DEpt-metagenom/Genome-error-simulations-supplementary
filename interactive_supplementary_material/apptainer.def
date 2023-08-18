@@ -1,0 +1,26 @@
+Bootstrap: docker
+From: debian:11.4
+
+%files
+
+	overlooked_phenomenon_shinyapp.R /opt/
+	load_vars.RData /opt/
+
+%post
+
+    TZ=Europe/Budapest
+    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo $TZ > /etc/timezone
+
+    apt update
+
+	apt install -y r-base r-cran-shiny r-cran-shinydashboard r-cran-httr r-cran-tidyverse r-cran-ggplot2 r-cran-plotly r-cran-ggally
+
+	Rscript -e "install.packages(c(\"shinydashboardPlus\", \"DT\", \"hablar\", \"magrittr\", \"betareg\"))"
+
+%runscript
+
+	echo "You can access the ShinyApp by opening the following link in your browser: http://127.0.0.1:6186/" & R --quiet --no-save < /opt/overlooked_phenomenon_shinyapp.R 1>/dev/null 2>/dev/null
+	
+%environment
+
+    export LC_ALL=C
